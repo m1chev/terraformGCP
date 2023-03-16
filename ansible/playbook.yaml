@@ -1,0 +1,46 @@
+- hosts: k8s1
+  become: true
+  tasks:
+  - name: Install k3s
+    ansible.builtin.shell:
+      cmd: curl -sfL https://get.k3s.io | sh -
+
+  - name: Extract the k3s token to variable
+    ansible.builtin.shell: cat /var/lib/rancher/k3s/server/node-token
+    register: node_token
+    ignore_errors: true
+
+  - name: Save k3s token to file
+    ansible.builtin.shell:
+        cmd: 'echo "token: {{ node_token.stdout }}" > /home/michev/node_token'
+
+  - name: Install Helm
+    ansible.builtin.shell:
+      cmd: curl https://baltocdn.com/helm/signing.asc |
+        gpg --dearmor |
+        sudo tee /usr/share/keyrings/helm.gpg > /dev/null &&
+        sudo apt-get install apt-transport-https --yes &&
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" |
+        sudo tee /etc/apt/sources.list.d/helm-stable-debian.list &&
+        sudo apt-get update &&
+        sudo apt-get install helm
+
+  - name: Add env variables
+    ansible.builtin.shell: export KUBECONFIG=/etc/rancher/k3s/k3s.yaml &&
+      helm repo add bitnami https://charts.bitnami.com/bitnami &&
+      helm install nginx-1 bitnami/nginx
+
+  - name: Fatch k3s token to host
+    ansible.builtin.fetch:
+      src: /home/michev/node_token
+      dest: /tmp/node_token
+      flat: yes
+
+- hosts: k8s2
+  become: true
+  vars_files:
+    - /tmp/node_token
+  tasks:
+  - name: Install k3s
+    ansible.builtin.shell:
+      cmd: curl -sfL https://get.k3s.io | K3S_URL=https://10.164.0.29:6443 K3S_TOKEN={{ token }} sh -
